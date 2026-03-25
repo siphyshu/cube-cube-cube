@@ -372,6 +372,8 @@
                 return () => document.removeEventListener('mousedown', handleClickOutside);
             }, []);
 
+            const filteredOptions = options.filter(opt => opt !== selected);
+
             return (
                 <div className="relative z-[60]" ref={ref}>
                     <button 
@@ -383,7 +385,7 @@
                     
                     {isOpen && (
                         <div className="absolute top-full left-0 mt-1 w-48 bg-[#181b25] border border-white/10 rounded-lg shadow-xl overflow-y-auto max-h-60 py-1 no-scrollbar z-[70]">
-                            {options.map(opt => (
+                            {filteredOptions.map(opt => (
                                 <button 
                                     key={opt}
                                     onClick={() => { onSelect(opt); setIsOpen(false); }}
@@ -457,7 +459,7 @@
             // Local States
             const [cubeState, setCubeState] = useState(null);
             const [showPbBadge, setShowPbBadge] = useState(false);
-            const panelOptions = ['Solves', 'Stats', 'Scramble', 'Time Graph', 'Export CSV', 'None'];
+            const panelOptions = ['Solves', 'Stats', 'Scramble', 'Time Graph', 'Export CSV', 'Import CSV', 'None'];
 
             // Timer state: 'idle' | 'ready' (holding space) | 'running'
             const [timerState, setTimerState] = useState('idle');
@@ -488,6 +490,37 @@
                 link.click();
                 document.body.removeChild(link);
             }, [solves]);
+
+            const handleImportCSV = useCallback(() => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.csv';
+                input.onchange = (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const text = event.target.result;
+                        const lines = text.split('\n').slice(1);
+                        const importedSolves = lines.filter(line => line.trim()).map(line => {
+                            const parts = line.split(',');
+                            const time = parseInt(parts[0]?.trim());
+                            const penalty = parts[1]?.trim() || '';
+                            const scrambleMatch = line.match(/"([^"]*)"/);
+                            const scramble = scrambleMatch ? scrambleMatch[1] : parts[2]?.trim() || '';
+                            if (!isNaN(time)) {
+                                return { id: Date.now() + Math.random(), time, penalty, scramble };
+                            }
+                            return null;
+                        }).filter(Boolean);
+                        if (importedSolves.length > 0) {
+                            setSolves(prev => [...importedSolves.reverse(), ...prev]);
+                        }
+                    };
+                    reader.readAsText(file);
+                };
+                input.click();
+            }, []);
 
             // Save to LocalStorage effects
             useEffect(() => { localStorage.setItem('cuboid-solves', JSON.stringify(solves)); }, [solves]);
@@ -962,6 +995,8 @@
                                         onSelect={(newVal) => {
                                             if (newVal === 'Export CSV') {
                                                 handleExportCSV();
+                                            } else if (newVal === 'Import CSV') {
+                                                handleImportCSV();
                                             } else {
                                                 const newPanels = [...panels];
                                                 newPanels[index] = newVal;
