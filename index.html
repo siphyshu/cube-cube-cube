@@ -378,7 +378,7 @@
                     </button>
                     
                     {isOpen && (
-                        <div className="absolute top-full left-0 mt-1 w-48 bg-[#181b25] border border-white/10 rounded-lg shadow-xl overflow-hidden py-1">
+                        <div className="absolute top-full left-0 mt-1 w-48 bg-[#181b25] border border-white/10 rounded-lg shadow-xl overflow-y-auto max-h-60 py-1">
                             {options.map(opt => (
                                 <button 
                                     key={opt}
@@ -964,7 +964,7 @@
                                         }} 
                                     />
                                 </div>
-                                <div className={`flex-1 relative ${panelType === 'Scramble' || panelType === 'Time Graph' ? 'overflow-hidden' : 'overflow-y-auto overflow-x-hidden'}`}>
+                                <div className="flex-1 relative overflow-hidden">
                                     {renderPanelContent(panelType, index)}
                                 </div>
                             </div>
