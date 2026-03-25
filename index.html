@@ -373,7 +373,7 @@
             }, []);
 
             return (
-                <div className="relative z-20" ref={ref}>
+                <div className="relative z-[60]" ref={ref}>
                     <button 
                         onClick={() => setIsOpen(!isOpen)}
                         className={`bg-primary hover:bg-blue-500 text-white text-sm font-semibold px-3 py-1.5 rounded flex items-center gap-1 transition-all glow-blue ${isOpen ? 'active' : ''}`}
@@ -382,7 +382,7 @@
                     </button>
                     
                     {isOpen && (
-                        <div className="absolute top-full left-0 mt-1 w-48 bg-[#181b25] border border-white/10 rounded-lg shadow-xl overflow-y-auto max-h-60 py-1 no-scrollbar">
+                        <div className="absolute top-full left-0 mt-1 w-48 bg-[#181b25] border border-white/10 rounded-lg shadow-xl overflow-y-auto max-h-60 py-1 no-scrollbar z-[70]">
                             {options.map(opt => (
                                 <button 
                                     key={opt}
@@ -951,7 +951,7 @@
                     {/* Bottom Panels Grid */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 p-4 lg:p-6 bg-transparent w-full max-w-[1400px] mx-auto mt-auto">
                         {panels.map((panelType, index) => (
-                            <div key={index} className={`bg-module rounded-xl relative group h-[280px] flex flex-col overflow-hidden w-full shadow-lg transition-all ${panelType === 'Stats' ? 'border-2 border-[#2a323d]' : 'border border-transparent'}`}>
+                            <div key={index} className={`bg-module rounded-xl relative group h-[280px] flex flex-col w-full shadow-lg transition-all ${panelType === 'Stats' ? 'border-2 border-[#2a323d]' : 'border border-transparent'}`}>
                                 <div className="absolute top-3 left-3 z-40 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
                                     <Dropdown 
                                         label={panelType} 
