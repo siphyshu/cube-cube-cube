@@ -707,11 +707,9 @@
                             const penalty = parts[1]?.trim() || '';
                             const scrambleMatch = line.match(/"([^"]*)"/);
                             const scramble = scrambleMatch ? scrambleMatch[1] : parts[2]?.trim() || '';
-                            // Timestamp is the last column after the quoted scramble
-                            const afterQuote = line.lastIndexOf('"');
-                            const trailing = afterQuote > -1 ? line.slice(afterQuote + 1) : '';
-                            const tsPart = trailing.split(',').filter(s => s.trim()).pop();
-                            const timestamp = tsPart ? parseInt(tsPart.trim()) : 0;
+                            // Timestamp: always check the last CSV field
+                            const lastField = parts[parts.length - 1]?.trim();
+                            const timestamp = lastField && /^\d{10,}$/.test(lastField) ? parseInt(lastField) : 0;
                             if (!isNaN(time)) {
                                 return { id: Date.now() + Math.random(), time, penalty, scramble, timestamp: timestamp || 0 };
                             }
