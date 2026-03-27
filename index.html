@@ -95,6 +95,25 @@
         // --- Google Sheets Sync ---
         const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxWYpcJ-_6Vy6rqyyEqpV9zrSEyZAfbKT8ptCS8YuFF630CZBJv3aioIW52VgFAp-Au/exec';
 
+        // ─── FIX 1: Guaranteed-unique ID generator ────────────────────────────────
+        // Using crypto.randomUUID() avoids float IDs that lose precision through
+        // JSON round-trips, eliminating the key-collision / delete-mismatch bug.
+        function makeId() {
+            if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+                return crypto.randomUUID();
+            }
+            // Fallback: 16-char hex string
+            return Array.from({ length: 16 }, () =>
+                Math.floor(Math.random() * 16).toString(16)
+            ).join('');
+        }
+
+        // ─── FIX 2: Content fingerprint for dedup ────────────────────────────────
+        // Used as a secondary dedup key when timestamps don't match.
+        function solveFingerprint(s) {
+            return `${s.time}|${s.penalty}|${s.scramble}`;
+        }
+
         // Fetch all timestamps currently stored in Sheets (used before importing)
         async function fetchSheetsTimestamps() {
             try {
@@ -102,7 +121,7 @@
                 const json = await res.json();
                 return new Set((json.timestamps || []).map(String));
             } catch(e) {
-                return null; // null = Sheets unreachable, caller decides what to do
+                return null;
             }
         }
 
@@ -113,13 +132,11 @@
         function generateScramble(length = 20) {
             let scramble = [];
             let lastMove = "";
-
             for (let i = 0; i < length; i++) {
                 let move;
                 do {
                     move = MOVES[Math.floor(Math.random() * MOVES.length)];
                 } while (move === lastMove || isOpposite(move, lastMove));
-
                 let modifier = MODIFIERS[Math.floor(Math.random() * MODIFIERS.length)];
                 scramble.push(move + modifier);
                 lastMove = move;
@@ -134,7 +151,6 @@
 
         function getScrambledState(scrambleStr) {
             if (!scrambleStr) return null;
-            
             const state = {
                 U: Array(9).fill('#ffffff'),
                 L: Array(9).fill('#ff9826'),
@@ -143,7 +159,6 @@
                 B: Array(9).fill('#246bfd'),
                 D: Array(9).fill('#ffff49')
             };
-            
             const cycle = (f1, i1, f2, i2, f3, i3, f4, i4) => {
                 let temp = state[f4][i4];
                 state[f4][i4] = state[f3][i3];
@@ -151,7 +166,6 @@
                 state[f2][i2] = state[f1][i1];
                 state[f1][i1] = temp;
             };
-
             const rotateFaceCW = (f) => {
                 const face = state[f];
                 const temp = [...face];
@@ -159,36 +173,15 @@
                 face[3] = temp[7]; face[4] = temp[4]; face[5] = temp[1];
                 face[6] = temp[8]; face[7] = temp[5]; face[8] = temp[2];
             };
-
             const applyMoveCW = (move) => {
                 rotateFaceCW(move);
-                if (move === 'U') {
-                    cycle('B', 2, 'R', 2, 'F', 2, 'L', 2);
-                    cycle('B', 1, 'R', 1, 'F', 1, 'L', 1);
-                    cycle('B', 0, 'R', 0, 'F', 0, 'L', 0);
-                } else if (move === 'D') {
-                    cycle('F', 6, 'R', 6, 'B', 6, 'L', 6);
-                    cycle('F', 7, 'R', 7, 'B', 7, 'L', 7);
-                    cycle('F', 8, 'R', 8, 'B', 8, 'L', 8);
-                } else if (move === 'F') {
-                    cycle('U', 6, 'R', 0, 'D', 2, 'L', 8);
-                    cycle('U', 7, 'R', 3, 'D', 1, 'L', 5);
-                    cycle('U', 8, 'R', 6, 'D', 0, 'L', 2);
-                } else if (move === 'B') {
-                    cycle('U', 2, 'L', 0, 'D', 6, 'R', 8);
-                    cycle('U', 1, 'L', 3, 'D', 7, 'R', 5);
-                    cycle('U', 0, 'L', 6, 'D', 8, 'R', 2);
-                } else if (move === 'L') {
-                    cycle('U', 0, 'B', 8, 'D', 0, 'F', 0);
-                    cycle('U', 3, 'B', 5, 'D', 3, 'F', 3);
-                    cycle('U', 6, 'B', 2, 'D', 6, 'F', 6);
-                } else if (move === 'R') {
-                    cycle('F', 2, 'U', 2, 'B', 6, 'D', 2);
-                    cycle('F', 5, 'U', 5, 'B', 3, 'D', 5);
-                    cycle('F', 8, 'U', 8, 'B', 0, 'D', 8);
-                }
+                if (move === 'U') { cycle('B',2,'R',2,'F',2,'L',2); cycle('B',1,'R',1,'F',1,'L',1); cycle('B',0,'R',0,'F',0,'L',0); }
+                else if (move === 'D') { cycle('F',6,'R',6,'B',6,'L',6); cycle('F',7,'R',7,'B',7,'L',7); cycle('F',8,'R',8,'B',8,'L',8); }
+                else if (move === 'F') { cycle('U',6,'R',0,'D',2,'L',8); cycle('U',7,'R',3,'D',1,'L',5); cycle('U',8,'R',6,'D',0,'L',2); }
+                else if (move === 'B') { cycle('U',2,'L',0,'D',6,'R',8); cycle('U',1,'L',3,'D',7,'R',5); cycle('U',0,'L',6,'D',8,'R',2); }
+                else if (move === 'L') { cycle('U',0,'B',8,'D',0,'F',0); cycle('U',3,'B',5,'D',3,'F',3); cycle('U',6,'B',2,'D',6,'F',6); }
+                else if (move === 'R') { cycle('F',2,'U',2,'B',6,'D',2); cycle('F',5,'U',5,'B',3,'D',5); cycle('F',8,'U',8,'B',0,'D',8); }
             };
-
             const moves = scrambleStr.split(' ');
             for (let m of moves) {
                 if (!m) continue;
@@ -208,12 +201,10 @@
             let actualMs = ms;
             if (penalty === '+2') actualMs += 2000;
             if (actualMs < 0) return "0.00";
-            
             const totalSeconds = Math.floor(actualMs / 1000);
             const minutes = Math.floor(totalSeconds / 60);
             const remainingSeconds = totalSeconds % 60;
             const decimals = Math.floor((actualMs % 1000) / 10);
-            
             let timeStr = "";
             if (minutes > 0) {
                 timeStr = `${minutes}:${remainingSeconds.toString().padStart(2, '0')}.${decimals.toString().padStart(2, '0')}`;
@@ -232,12 +223,12 @@
 
         function calculateAverage(solves, count) {
             if (solves.length < count) return "-";
-            const recent = solves.slice(0, count).map(getActualTime); 
+            const recent = solves.slice(0, count).map(getActualTime);
             const dnfs = recent.filter(t => t === Infinity).length;
             if (dnfs > 1) return "DNF";
             recent.sort((a, b) => a - b);
-            const trimmed = recent.slice(1, -1); 
-            if (trimmed.includes(Infinity)) return "DNF"; 
+            const trimmed = recent.slice(1, -1);
+            if (trimmed.includes(Infinity)) return "DNF";
             const sum = trimmed.reduce((acc, val) => acc + val, 0);
             return formatTime(sum / trimmed.length);
         }
@@ -267,7 +258,6 @@
 
             useEffect(() => {
                 if (!chartRef.current) return;
-                
                 const canvas = chartRef.current;
                 const ctx = canvas.getContext('2d');
                 const times = solves.map(s => getActualTime(s) / 1000);
@@ -280,7 +270,6 @@
                     const trimmed = sorted.slice(1, -1);
                     return trimmed.reduce((a, b) => a + b, 0) / trimmed.length;
                 };
-
                 const calcStdDev = (arr, idx) => {
                     if (idx < 4) return null;
                     const w = arr.slice(idx - 4, idx + 1);
@@ -288,27 +277,12 @@
                     const variance = w.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / w.length;
                     return Math.sqrt(variance);
                 };
-
                 const ao5 = times.map((_, i) => calcAo5(times, i));
-                const bandUpper = times.map((_, i) => {
-                    const sd = calcStdDev(times, i);
-                    const a = ao5[i];
-                    return (sd !== null && a !== null) ? a + sd : null;
-                });
-                const bandLower = times.map((_, i) => {
-                    const sd = calcStdDev(times, i);
-                    const a = ao5[i];
-                    return (sd !== null && a !== null) ? a - sd : null;
-                });
-
+                const bandUpper = times.map((_, i) => { const sd = calcStdDev(times, i); const a = ao5[i]; return (sd !== null && a !== null) ? a + sd : null; });
+                const bandLower = times.map((_, i) => { const sd = calcStdDev(times, i); const a = ao5[i]; return (sd !== null && a !== null) ? a - sd : null; });
                 const bestIdx = times.indexOf(Math.min(...times));
                 const fmtAxis = (sec) => Math.round(sec) + 's';
-                const fmtMin = (sec) => {
-                    const m = Math.floor(sec / 60);
-                    const s = sec % 60;
-                    const sFixed = s.toFixed(2);
-                    return m > 0 ? m + ':' + sFixed.padStart(5, '0') : sFixed;
-                };
+                const fmtMin = (sec) => { const m = Math.floor(sec / 60); const s = sec % 60; const sFixed = s.toFixed(2); return m > 0 ? m + ':' + sFixed.padStart(5, '0') : sFixed; };
 
                 if (chartInstance.current) chartInstance.current.destroy();
 
@@ -326,15 +300,8 @@
                         const x = tt.getActiveElements()[0].element.x;
                         const yAxis = chart.scales.y;
                         const c = chart.ctx;
-                        c.save();
-                        c.beginPath();
-                        c.setLineDash([3, 4]);
-                        c.moveTo(x, yAxis.top);
-                        c.lineTo(x, yAxis.bottom);
-                        c.lineWidth = 1;
-                        c.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-                        c.stroke();
-                        c.restore();
+                        c.save(); c.beginPath(); c.setLineDash([3, 4]); c.moveTo(x, yAxis.top); c.lineTo(x, yAxis.bottom);
+                        c.lineWidth = 1; c.strokeStyle = 'rgba(255, 255, 255, 0.1)'; c.stroke(); c.restore();
                     }
                 };
 
@@ -363,40 +330,23 @@
                                 enabled: false,
                                 external: function(context) {
                                     let tooltipEl = document.getElementById('chartjs-tooltip-cuboid');
-                                    if (!tooltipEl) {
-                                        tooltipEl = document.createElement('div');
-                                        tooltipEl.id = 'chartjs-tooltip-cuboid';
-                                        tooltipEl.style.cssText = 'position:fixed;pointer-events:none;z-index:9999;transition:opacity 0.15s ease,transform 0.15s ease;opacity:0;transform:translateY(4px);';
-                                        document.body.appendChild(tooltipEl);
-                                    }
+                                    if (!tooltipEl) { tooltipEl = document.createElement('div'); tooltipEl.id = 'chartjs-tooltip-cuboid'; tooltipEl.style.cssText = 'position:fixed;pointer-events:none;z-index:9999;transition:opacity 0.15s ease,transform 0.15s ease;opacity:0;transform:translateY(4px);'; document.body.appendChild(tooltipEl); }
                                     const tooltip = context.tooltip;
                                     if (tooltip.opacity === 0) { tooltipEl.style.opacity = '0'; tooltipEl.style.transform = 'translateY(4px)'; return; }
                                     const idx = tooltip.dataPoints[0].dataIndex;
-                                    const time = times[idx];
-                                    const a5 = ao5[idx];
-                                    const sd = calcStdDev(times, idx);
-                                    const isPB = idx === bestIdx;
+                                    const time = times[idx]; const a5 = ao5[idx]; const sd = calcStdDev(times, idx); const isPB = idx === bestIdx;
                                     let html = '<div style="background:rgba(12,13,20,0.95);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px 14px;backdrop-filter:blur(12px);min-width:130px;">';
                                     html += '<div style="font-family:Inter,sans-serif;font-size:10px;font-weight:600;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Solve #' + labels[idx] + (isPB ? ' <span style="color:#22c55e;">\u2605 PB</span>' : '') + '</div>';
                                     html += '<div style="display:flex;align-items:baseline;gap:4px;margin-bottom:' + (a5 !== null ? '5' : '0') + 'px;"><span style="font-family:\'Roboto Mono\',monospace;font-size:18px;font-weight:700;color:#fff;">' + fmtMin(time) + '</span></div>';
-                                    if (a5 !== null) {
-                                        html += '<div style="display:flex;justify-content:space-between;gap:12px;">';
-                                        html += '<div style="font-family:\'Roboto Mono\',monospace;font-size:11px;color:#22c55e;">ao5 ' + fmtMin(a5) + '</div>';
-                                        if (sd !== null) html += '<div style="font-family:\'Roboto Mono\',monospace;font-size:11px;color:rgba(255,255,255,0.3);">\u00b1' + sd.toFixed(1) + 's</div>';
-                                        html += '</div>';
-                                    }
+                                    if (a5 !== null) { html += '<div style="display:flex;justify-content:space-between;gap:12px;">'; html += '<div style="font-family:\'Roboto Mono\',monospace;font-size:11px;color:#22c55e;">ao5 ' + fmtMin(a5) + '</div>'; if (sd !== null) html += '<div style="font-family:\'Roboto Mono\',monospace;font-size:11px;color:rgba(255,255,255,0.3);">\u00b1' + sd.toFixed(1) + 's</div>'; html += '</div>'; }
                                     html += '</div>';
-                                    tooltipEl.innerHTML = html;
-                                    tooltipEl.style.opacity = '1';
-                                    tooltipEl.style.transform = 'translateY(0)';
+                                    tooltipEl.innerHTML = html; tooltipEl.style.opacity = '1'; tooltipEl.style.transform = 'translateY(0)';
                                     const canvasRect = context.chart.canvas.getBoundingClientRect();
-                                    let left = canvasRect.left + tooltip.caretX + 12;
-                                    let top = canvasRect.top + tooltip.caretY - 30;
+                                    let left = canvasRect.left + tooltip.caretX + 12; let top = canvasRect.top + tooltip.caretY - 30;
                                     const tipRect = tooltipEl.getBoundingClientRect();
                                     if (left + tipRect.width > window.innerWidth - 8) left = canvasRect.left + tooltip.caretX - tipRect.width - 12;
                                     if (top < 8) top = 8;
-                                    tooltipEl.style.left = left + 'px';
-                                    tooltipEl.style.top = top + 'px';
+                                    tooltipEl.style.left = left + 'px'; tooltipEl.style.top = top + 'px';
                                 }
                             }
                         },
@@ -423,17 +373,12 @@
         const Dropdown = ({ label, options, selected, onSelect }) => {
             const [isOpen, setIsOpen] = useState(false);
             const ref = useRef(null);
-
             useEffect(() => {
-                const handleClickOutside = (event) => {
-                    if (ref.current && !ref.current.contains(event.target)) setIsOpen(false);
-                };
+                const handleClickOutside = (event) => { if (ref.current && !ref.current.contains(event.target)) setIsOpen(false); };
                 document.addEventListener('mousedown', handleClickOutside);
                 return () => document.removeEventListener('mousedown', handleClickOutside);
             }, []);
-
             const filteredOptions = options.filter(opt => opt !== selected);
-
             return (
                 <div className="relative z-[60]" ref={ref}>
                     <button onClick={() => setIsOpen(!isOpen)} className={`bg-primary hover:bg-blue-500 text-white text-sm font-semibold px-3 py-1.5 rounded flex items-center gap-1 transition-all glow-blue ${isOpen ? 'active' : ''}`}>
@@ -462,13 +407,25 @@
             { id: 7, type: 'Average', result: 'Current', label: 'ao12', count: 12, colSpan: 1, rowSpan: 1 },
         ];
 
+        // ─── FIX 3: migrate old numeric IDs to UUID strings on load ─────────────
+        function migrateSolves(parsed) {
+            return parsed.map(s => {
+                const needsNewId = !s.id || typeof s.id === 'number';
+                return {
+                    ...s,
+                    id: needsNewId ? makeId() : s.id,
+                    timestamp: s.timestamp || (typeof s.id === 'number' ? Math.floor(s.id) : 0),
+                };
+            });
+        }
+
         // --- Main App ---
         function App() {
             const [solves, setSolves] = useState(() => {
                 try {
                     const saved = localStorage.getItem('cuboid-solves');
                     const parsed = saved ? JSON.parse(saved) : [];
-                    return parsed.map(s => s.timestamp ? s : { ...s, timestamp: Math.floor(s.id) || 0 });
+                    return migrateSolves(parsed);
                 } catch(e) { return []; }
             });
             const [statsConfig, setStatsConfig] = useState(() => {
@@ -492,7 +449,7 @@
 
             const [cubeState, setCubeState] = useState(null);
             const [showPbBadge, setShowPbBadge] = useState(false);
-            const [cloudStatus, setCloudStatus] = useState('idle'); // 'idle' | 'success' | 'error'
+            const [cloudStatus, setCloudStatus] = useState('idle');
             const panelOptions = useMemo(() => ['Solves', 'Stats', 'Scramble', 'Time Graph', 'Export CSV', 'Import CSV', 'None'], []);
             const [timerState, setTimerState] = useState('idle');
             const [timeMs, setTimeMs] = useState(() => {
@@ -503,7 +460,7 @@
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [selectedBlockId, setSelectedBlockId] = useState(1);
 
-            // --- Export CSV ---
+            // Export CSV
             const handleExportCSV = useCallback(() => {
                 if (solves.length === 0) return;
                 const csvContent = "data:text/csv;charset=utf-8," + "Time (ms),Penalty,Scramble,Timestamp\n" + solves.map(s => `${s.time},${s.penalty},"${s.scramble}",${s.timestamp || ''}`).join("\n");
@@ -515,8 +472,7 @@
                 document.body.removeChild(link);
             }, [solves]);
 
-            // --- Import CSV ---
-            // Checks Sheets first, only uploads timestamps missing from Sheets
+            // ─── FIX 4: Robust Import — dual-key dedup (timestamp + content fingerprint) ─
             const handleImportCSV = useCallback(() => {
                 const input = document.createElement('input');
                 input.type = 'file';
@@ -536,41 +492,46 @@
                             const scramble = scrambleMatch ? scrambleMatch[1] : parts[2]?.trim() || '';
                             const lastField = parts[parts.length - 1]?.trim();
                             const timestamp = lastField && /^\d{10,}$/.test(lastField) ? parseInt(lastField) : 0;
-                            if (!isNaN(time)) return { id: Date.now() + Math.random(), time, penalty, scramble, timestamp: timestamp || 0 };
+                            if (!isNaN(time)) {
+                                return {
+                                    id: makeId(),           // Always fresh UUID — no float ID risk
+                                    time,
+                                    penalty,
+                                    scramble,
+                                    timestamp: timestamp || Date.now(),
+                                };
+                            }
                             return null;
                         }).filter(Boolean);
 
                         if (importedSolves.length === 0) return;
 
-                        importedSolves.forEach((s, i) => {
-                            if (!s.id) s.id = Date.now() + i + Math.random();
-                            if (!s.timestamp) s.timestamp = s.id;
-                        });
-
-                        // --- STEP 1: Update UI instantly, no waiting ---
                         setSolves(prev => {
-                            const existingLocalTs = new Set(prev.map(s => s.timestamp).filter(Boolean).map(String));
-                            const updated = prev.map(s => {
-                                if (!s.timestamp) {
-                                    const match = importedSolves.find(imp => imp.timestamp && imp.time === s.time && imp.penalty === s.penalty && imp.scramble === s.scramble);
-                                    return match ? { ...s, timestamp: match.timestamp } : s;
-                                }
-                                return s;
+                            // Build two dedup sets from existing solves
+                            const existingTs  = new Set(prev.map(s => String(s.timestamp)).filter(t => t !== '0'));
+                            const existingFps = new Set(prev.map(solveFingerprint));
+
+                            const toAdd = importedSolves.filter(imp => {
+                                // Skip if timestamp already present
+                                if (imp.timestamp && existingTs.has(String(imp.timestamp))) return false;
+                                // Skip if identical time+penalty+scramble already present
+                                if (existingFps.has(solveFingerprint(imp))) return false;
+                                return true;
                             });
-                            const uniqueLocally = importedSolves.filter(s => !s.timestamp || !existingLocalTs.has(String(s.timestamp)));
-                            const merged = [...updated, ...uniqueLocally];
+
+                            if (toAdd.length === 0) return prev;  // Nothing new → no state change
+
+                            const merged = [...prev, ...toAdd];
                             merged.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
                             return merged;
                         });
 
-                        // --- STEP 2: Check Sheets in the background, then push only what's missing ---
+                        // Push only truly new solves to Sheets in background
                         fetchSheetsTimestamps().then(sheetsTimestamps => {
-                            if (sheetsTimestamps === null) return; // Sheets unreachable — skip, no duplicates
-
+                            if (sheetsTimestamps === null) return;
                             const solvesToPush = importedSolves.filter(s =>
                                 s.timestamp && !sheetsTimestamps.has(String(s.timestamp))
                             );
-
                             if (solvesToPush.length > 0) {
                                 fetch(SHEETS_URL, { method: 'POST', body: JSON.stringify(solvesToPush) })
                                     .then(r => r.json())
@@ -627,7 +588,6 @@
                 timerRef.current = requestAnimationFrame(updateTime);
             }, [updateTime]);
 
-            // Sync a single live solve to Sheets
             const syncToSheets = useCallback(async (solveData) => {
                 try {
                     const res = await fetch(SHEETS_URL, { method: 'POST', body: JSON.stringify(solveData) });
@@ -637,7 +597,10 @@
                 setTimeout(() => setCloudStatus('idle'), 1500);
             }, []);
 
-            // Delete a row from Sheets by timestamp
+            // ─── FIX 5: deleteFromSheets called OUTSIDE setState updater ─────────────
+            // Previously this was called inside the setSolves updater, which caused
+            // setCloudStatus to fire mid-update and triggered React to re-reconcile
+            // the list using stale closures — making the delete appear to silently fail.
             const deleteFromSheets = useCallback(async (timestamp) => {
                 if (!timestamp) return;
                 try {
@@ -660,7 +623,13 @@
                 setTimeMs(finalTime);
 
                 const now = Date.now();
-                const newSolve = { id: now, time: finalTime, penalty: '', scramble: scrambleMode ? scramble : 'No Scramble', timestamp: now };
+                const newSolve = {
+                    id: makeId(),       // UUID, not a timestamp float
+                    time: finalTime,
+                    penalty: '',
+                    scramble: scrambleMode ? scramble : 'No Scramble',
+                    timestamp: now
+                };
 
                 setSolves(prev => {
                     const validTimes = prev.map(getActualTime).filter(t => t !== Infinity);
@@ -677,6 +646,39 @@
                     setCubeState(getScrambledState(next));
                 }
             }, [scramble, isLocked, scrambleMode, syncToSheets]);
+
+            // ─── FIX 6: deleteSolve — side effect moved outside the updater ──────────
+            // The updater function is now pure (no async calls inside).
+            // deleteFromSheets is called after setSolves, not inside it.
+            const deleteSolve = useCallback((id) => {
+                let timestampToDelete = null;
+                setSolves(prev => {
+                    const target = prev.find(s => s.id === id);
+                    if (target) timestampToDelete = target.timestamp;
+                    return prev.filter(s => s.id !== id);
+                });
+                // Defer Sheets delete to next tick so it's outside the render cycle
+                setTimeout(() => {
+                    if (timestampToDelete) deleteFromSheets(timestampToDelete);
+                }, 0);
+            }, [deleteFromSheets]);
+
+            // ─── FIX 7: Remove all duplicates utility ────────────────────────────────
+            // Keeps the first occurrence of each (timestamp, fingerprint) pair.
+            const removeDuplicates = useCallback(() => {
+                setSolves(prev => {
+                    const seenTs  = new Set();
+                    const seenFps = new Set();
+                    return prev.filter(s => {
+                        const tsKey = String(s.timestamp);
+                        const fp    = solveFingerprint(s);
+                        if ((s.timestamp && seenTs.has(tsKey)) || seenFps.has(fp)) return false;
+                        if (s.timestamp) seenTs.add(tsKey);
+                        seenFps.add(fp);
+                        return true;
+                    });
+                });
+            }, []);
 
             const handleTouchStart = useCallback((e) => {
                 if (isModalOpen) return;
@@ -736,17 +738,6 @@
                 });
             }, []);
 
-            // Delete from local state AND from Sheets
-            const deleteSolve = useCallback((id) => {
-                setSolves(prev => {
-                    const solve = prev.find(s => s.id === id);
-                    if (solve && solve.timestamp) {
-                        deleteFromSheets(solve.timestamp);
-                    }
-                    return prev.filter(s => s.id !== id);
-                });
-            }, [deleteFromSheets]);
-
             const calcStatValue = useCallback((config, allSolves) => {
                 const validTimes = allSolves.map(getActualTime).filter(t => t !== Infinity);
                 if (validTimes.length === 0) return allSolves.length > 0 ? "DNF" : "-";
@@ -779,11 +770,33 @@
             const totalArea = useMemo(() => statsConfig.reduce((acc, block) => acc + ((block.colSpan || 1) * (block.rowSpan || 1)), 0), [statsConfig]);
             const statsRowsNeeded = Math.max(1, Math.ceil(totalArea / 2));
 
+            // Detect duplicates for the "Remove Duplicates" button
+            const duplicateCount = useMemo(() => {
+                const seenTs  = new Set();
+                const seenFps = new Set();
+                let count = 0;
+                solves.forEach(s => {
+                    const tsKey = String(s.timestamp);
+                    const fp    = solveFingerprint(s);
+                    if ((s.timestamp && seenTs.has(tsKey)) || seenFps.has(fp)) { count++; return; }
+                    if (s.timestamp) seenTs.add(tsKey);
+                    seenFps.add(fp);
+                });
+                return count;
+            }, [solves]);
+
             const renderPanelContent = (type, index) => {
                 switch (type) {
                     case 'Solves':
                         return (
                             <div className="w-full h-full flex flex-col p-3">
+                                {/* ─── FIX 8: "Remove Duplicates" banner shown only when dupes exist ── */}
+                                {duplicateCount > 0 && (
+                                    <div className="flex items-center justify-between bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-1.5 mb-2 flex-shrink-0">
+                                        <span className="text-red-400 text-xs font-semibold">{duplicateCount} duplicate{duplicateCount > 1 ? 's' : ''} detected</span>
+                                        <button onClick={removeDuplicates} className="text-red-400 hover:text-white text-xs font-bold underline transition-colors ml-2">Remove all</button>
+                                    </div>
+                                )}
                                 {solves.length === 0 ? (
                                     <div className="text-center opacity-50 flex flex-col items-center justify-center h-full">
                                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className="mb-2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
@@ -802,7 +815,11 @@
                                                 <div className="flex items-center gap-3 font-bold text-xs tracking-wider">
                                                     <button onClick={() => togglePenalty(s.id, '+2')} className={`transition-colors ${s.penalty === '+2' ? 'text-white' : 'text-gray-500 hover:text-white'}`} aria-label="Add +2 penalty">+2</button>
                                                     <button onClick={() => togglePenalty(s.id, 'DNF')} className={`transition-colors ${s.penalty === 'DNF' ? 'text-white' : 'text-gray-500 hover:text-white'}`} aria-label="Add DNF penalty">DNF</button>
-                                                    <button onClick={() => deleteSolve(s.id)} className="text-gray-500 hover:text-white ml-2 flex items-center justify-center" aria-label="Delete solve"><CloseIcon /></button>
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); deleteSolve(s.id); }}
+                                                        className="text-gray-500 hover:text-white ml-2 flex items-center justify-center"
+                                                        aria-label="Delete solve"
+                                                    ><CloseIcon /></button>
                                                 </div>
                                             </div>
                                         ))}
