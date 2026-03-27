@@ -525,7 +525,7 @@
                     const file = e.target.files[0];
                     if (!file) return;
                     const reader = new FileReader();
-                    reader.onload = async (event) => {
+                    reader.onload = (event) => {
                         const text = event.target.result;
                         const lines = text.split('\n').slice(1);
                         const importedSolves = lines.filter(line => line.trim()).map(line => {
@@ -547,14 +547,9 @@
                             if (!s.timestamp) s.timestamp = s.id;
                         });
 
-                        // Ask Sheets which timestamps it already has — this is the source of truth
-                        const sheetsTimestamps = await fetchSheetsTimestamps();
-                        // sheetsTimestamps === null means Sheets was unreachable
-
-                        let solvesToPush = [];
-
+                        // --- STEP 1: Update UI instantly, no waiting ---
+                        let allImportedTimestamps = [];
                         setSolves(prev => {
-                            // Merge into local storage (dedup by timestamp)
                             const existingLocalTs = new Set(prev.map(s => s.timestamp).filter(Boolean).map(String));
                             const updated = prev.map(s => {
                                 if (!s.timestamp) {
@@ -564,29 +559,30 @@
                                 return s;
                             });
                             const uniqueLocally = importedSolves.filter(s => !s.timestamp || !existingLocalTs.has(String(s.timestamp)));
+                            allImportedTimestamps = importedSolves.map(s => s.timestamp).filter(Boolean);
                             const merged = [...updated, ...uniqueLocally];
                             merged.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-
-                            if (sheetsTimestamps !== null) {
-                                // Filter against what Sheets actually has — the real dedup check
-                                solvesToPush = importedSolves.filter(s => s.timestamp && !sheetsTimestamps.has(String(s.timestamp)));
-                            } else {
-                                // Can't reach Sheets — don't push, avoid any risk of duplicates
-                                solvesToPush = [];
-                            }
-
                             return merged;
                         });
 
-                        if (solvesToPush.length > 0) {
-                            fetch(SHEETS_URL, { method: 'POST', body: JSON.stringify(solvesToPush) })
-                                .then(r => r.json())
-                                .then(json => {
-                                    setCloudStatus(json.status === 'success' ? 'success' : 'error');
-                                    setTimeout(() => setCloudStatus('idle'), 1500);
-                                })
-                                .catch(() => { setCloudStatus('error'); setTimeout(() => setCloudStatus('idle'), 1500); });
-                        }
+                        // --- STEP 2: Check Sheets in the background, then push only what's missing ---
+                        fetchSheetsTimestamps().then(sheetsTimestamps => {
+                            if (sheetsTimestamps === null) return; // Sheets unreachable — skip, no duplicates
+
+                            const solvesToPush = importedSolves.filter(s =>
+                                s.timestamp && !sheetsTimestamps.has(String(s.timestamp))
+                            );
+
+                            if (solvesToPush.length > 0) {
+                                fetch(SHEETS_URL, { method: 'POST', body: JSON.stringify(solvesToPush) })
+                                    .then(r => r.json())
+                                    .then(json => {
+                                        setCloudStatus(json.status === 'success' ? 'success' : 'error');
+                                        setTimeout(() => setCloudStatus('idle'), 1500);
+                                    })
+                                    .catch(() => { setCloudStatus('error'); setTimeout(() => setCloudStatus('idle'), 1500); });
+                            }
+                        });
                     };
                     reader.readAsText(file);
                 };
