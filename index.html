@@ -412,7 +412,7 @@
                 return () => {
                     if (chartInstance.current) chartInstance.current.destroy();
                     const tip = document.getElementById('chartjs-tooltip-cuboid');
-                    if (tip) tip.remove();
+                    if (tip) { tip.style.opacity = '0'; tip.remove(); }
                 };
             }, [solves]);
 
@@ -493,7 +493,7 @@
             const [cubeState, setCubeState] = useState(null);
             const [showPbBadge, setShowPbBadge] = useState(false);
             const [cloudStatus, setCloudStatus] = useState('idle'); // 'idle' | 'success' | 'error'
-            const panelOptions = ['Solves', 'Stats', 'Scramble', 'Time Graph', 'Export CSV', 'Import CSV', 'None'];
+            const panelOptions = useMemo(() => ['Solves', 'Stats', 'Scramble', 'Time Graph', 'Export CSV', 'Import CSV', 'None'], []);
             const [timerState, setTimerState] = useState('idle');
             const [timeMs, setTimeMs] = useState(() => {
                 try { const s = localStorage.getItem('cuboid-solves'); const p = s ? JSON.parse(s) : []; return p.length > 0 ? p[0].time : 0; } catch(e) { return 0; }
@@ -548,7 +548,6 @@
                         });
 
                         // --- STEP 1: Update UI instantly, no waiting ---
-                        let allImportedTimestamps = [];
                         setSolves(prev => {
                             const existingLocalTs = new Set(prev.map(s => s.timestamp).filter(Boolean).map(String));
                             const updated = prev.map(s => {
@@ -559,7 +558,6 @@
                                 return s;
                             });
                             const uniqueLocally = importedSolves.filter(s => !s.timestamp || !existingLocalTs.has(String(s.timestamp)));
-                            allImportedTimestamps = importedSolves.map(s => s.timestamp).filter(Boolean);
                             const merged = [...updated, ...uniqueLocally];
                             merged.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
                             return merged;
@@ -643,13 +641,16 @@
             const deleteFromSheets = useCallback(async (timestamp) => {
                 if (!timestamp) return;
                 try {
-                    await fetch(SHEETS_URL, {
+                    const res = await fetch(SHEETS_URL, {
                         method: 'POST',
                         body: JSON.stringify({ action: 'delete', timestamp }),
                     });
+                    const json = await res.json();
+                    setCloudStatus(json.status === 'success' ? 'success' : 'error');
                 } catch(e) {
-                    // Local delete still succeeds — Sheets delete is best-effort
+                    setCloudStatus('error');
                 }
+                setTimeout(() => setCloudStatus('idle'), 1500);
             }, []);
 
             const stopTimer = useCallback(() => {
@@ -658,11 +659,12 @@
                 const finalTime = Date.now() - startTimeRef.current;
                 setTimeMs(finalTime);
 
-                const newSolve = { id: Date.now(), time: finalTime, penalty: '', scramble: scrambleMode ? scramble : 'No Scramble', timestamp: Date.now() };
+                const now = Date.now();
+                const newSolve = { id: now, time: finalTime, penalty: '', scramble: scrambleMode ? scramble : 'No Scramble', timestamp: now };
 
                 setSolves(prev => {
-                    const validSolves = prev.filter(s => s.penalty !== 'DNF').map(s => s.time);
-                    if (validSolves.length === 0 || finalTime < Math.min(...validSolves)) setShowPbBadge(true);
+                    const validTimes = prev.map(getActualTime).filter(t => t !== Infinity);
+                    if (validTimes.length === 0 || finalTime < Math.min(...validTimes)) setShowPbBadge(true);
                     else setShowPbBadge(false);
                     return [newSolve, ...prev];
                 });
@@ -709,20 +711,29 @@
 
             const handleCopyScramble = () => {
                 if (!scramble) return;
-                const textarea = document.createElement('textarea');
-                textarea.value = scramble;
-                document.body.appendChild(textarea);
-                textarea.select();
-                try { document.execCommand('copy'); } catch(err) {}
-                document.body.removeChild(textarea);
-                const btn = document.getElementById('copyBtn');
-                if (btn) { btn.style.color = '#22c55e'; setTimeout(() => btn.style.color = '', 1000); }
+                navigator.clipboard.writeText(scramble).then(() => {
+                    const btn = document.getElementById('copyBtn');
+                    if (btn) { btn.style.color = '#22c55e'; setTimeout(() => btn.style.color = '', 1000); }
+                }).catch(() => {});
             };
 
             const handleNewScramble = () => setScramble(generateScramble());
 
             const togglePenalty = useCallback((id, type) => {
-                setSolves(prev => prev.map(s => s.id !== id ? s : { ...s, penalty: s.penalty === type ? '' : type }));
+                setSolves(prev => {
+                    const updated = prev.map(s => {
+                        if (s.id !== id) return s;
+                        return { ...s, penalty: s.penalty === type ? '' : type };
+                    });
+                    const updatedSolve = updated.find(s => s.id === id);
+                    if (updatedSolve && updatedSolve.timestamp) {
+                        fetch(SHEETS_URL, {
+                            method: 'POST',
+                            body: JSON.stringify({ action: 'updatePenalty', timestamp: updatedSolve.timestamp, penalty: updatedSolve.penalty }),
+                        }).catch(() => {});
+                    }
+                    return updated;
+                });
             }, []);
 
             // Delete from local state AND from Sheets
@@ -768,7 +779,7 @@
             const totalArea = useMemo(() => statsConfig.reduce((acc, block) => acc + ((block.colSpan || 1) * (block.rowSpan || 1)), 0), [statsConfig]);
             const statsRowsNeeded = Math.max(1, Math.ceil(totalArea / 2));
 
-            const renderPanelContent = (type) => {
+            const renderPanelContent = (type, index) => {
                 switch (type) {
                     case 'Solves':
                         return (
@@ -933,7 +944,7 @@
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 p-4 lg:p-6 bg-transparent w-full max-w-[1400px] mx-auto mt-auto">
                         {panels.map((panelType, index) => (
-                            <div key={index} className={`bg-module rounded-xl relative group h-[280px] flex flex-col w-full shadow-lg transition-all ${panelType === 'Stats' ? 'border-2 border-[#2a323d]' : 'border border-transparent'}`}>
+                            <div key={`${panelType}-${index}`} className={`bg-module rounded-xl relative group h-[280px] flex flex-col w-full shadow-lg transition-all ${panelType === 'Stats' ? 'border-2 border-[#2a323d]' : 'border border-transparent'}`}>
                                 <div className="absolute top-3 left-3 z-40 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
                                     <Dropdown label={panelType} options={panelOptions} selected={panelType} onSelect={(newVal) => {
                                         if (newVal === 'Export CSV') handleExportCSV();
