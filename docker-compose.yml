@@ -12,6 +12,6 @@ services:
     command: tunnel --origincert /etc/cloudflared/cert.pem --config /tunnel/config.yml run cuboid
     volumes:
       - ./cloudflared.yml:/tunnel/config.yml:ro
-      - /usr/local/etc/cloudflared:/etc/cloudflared:ro
+      - ${HOME}/.cloudflared:/etc/cloudflared:ro
     depends_on:
       - cuboid
