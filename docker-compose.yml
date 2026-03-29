@@ -1,0 +1,9 @@
+services:
+  cuboid:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: cuboid
+    restart: unless-stopped
+    ports:
+      - "3000:80"
