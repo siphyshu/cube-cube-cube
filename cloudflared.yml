@@ -1,0 +1,8 @@
+# Replace with your tunnel ID and credentials file
+tunnel: YOUR_TUNNEL_ID
+credentials-file: /etc/cloudflared/YOUR_TUNNEL_ID.json
+
+ingress:
+  - hostname: cube.siphyshu.me
+    service: http://cuboid:80
+  - service: http_status:404

@@ -5,5 +5,13 @@ services:
       dockerfile: docker/Dockerfile
     container_name: cuboid
     restart: unless-stopped
-    ports:
-      - "3847:80"
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --config /tunnel/config.yml run cuboid
+    volumes:
+      - ./cloudflared.yml:/tunnel/config.yml:ro
+      - ${HOME}/.cloudflared:/etc/cloudflared:ro
+    depends_on:
+      - cuboid
