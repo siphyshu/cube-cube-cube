@@ -1,6 +1,6 @@
 # Replace with your tunnel ID and credentials file
-tunnel: YOUR_TUNNEL_ID
-credentials-file: /etc/cloudflared/YOUR_TUNNEL_ID.json
+tunnel: 634ae960-68b8-4e84-a7a0-5881a665c3fa
+credentials-file: /etc/cloudflared/634ae960-68b8-4e84-a7a0-5881a665c3fa.json
 
 ingress:
   - hostname: cube.siphyshu.me
